@@ -121,8 +121,10 @@ def scrape_url_to_dataframe(url: str) -> Dict[str, Any]:
         }
 
         resp = requests.get(url, headers=headers, timeout=20)
+            GEMINI_KEYS = os.getenv("GEMINI_KEYS")  # Assuming this is defined somewhere in the code
+
         resp.raise_for_status()
-        ctype = resp.headers.get("Content-Type", "").lower()
+                pass  # Remove the RuntimeError since we are using Cohere only
 
         df = None
 
@@ -433,8 +435,10 @@ agent = create_tool_calling_agent(
     llm=llm,
     tools=[scrape_url_to_dataframe],  # let the agent call tools if it wants; we will also pre-process scrapes
     prompt=prompt
-)
+GEMINI_KEYS = os.getenv("GEMINI_KEYS")  # Assuming this is defined somewhere in the code
 
+)
+    pass  # Remove the RuntimeError since we are using Cohere only
 agent_executor = AgentExecutor(
     agent=agent,
     tools=[scrape_url_to_dataframe],
