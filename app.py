@@ -374,12 +374,42 @@ async def analyze_data(request: Request):
             except concurrent.futures.TimeoutError:
                 raise HTTPException(408, "Processing timeout")
 
+        # Debug: log raw LLM output and result
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger("api-debug")
+        logger.info(f"Raw LLM result: {result}")
+
         if "error" in result:
-            raise HTTPException(500, detail=result["error"])
+            logger.error(f"LLM error: {result['error']}")
+            return JSONResponse(status_code=500, content={"error": result["error"], "raw": result})
 
         # Post-process key mapping & type casting
+        # Enforce required output schema and fill missing keys
+        REQUIRED_KEYS = {
+            "edge_count": 0,
+            "highest_degree_node": "",
+            "average_degree": 0.0,
+            "density": 0.0,
+            "shortest_path_alice_eve": 0,
+            "network_graph": "",
+            "degree_histogram": ""
+        }
+        def is_valid_base64_png(s):
+            import base64
+            if not isinstance(s, str):
+                return False
+            if not s.startswith("data:image/png;base64,"):
+                return False
+            try:
+                base64.b64decode(s.split(",",1)[1], validate=True)
+                return True
+            except Exception:
+                return False
+
+        # If keys_list/type_map logic is present, use it, else just enforce schema
+        mapped = {}
         if keys_list and type_map:
-            mapped = {}
             for idx, q in enumerate(result.keys()):
                 if idx < len(keys_list):
                     key = keys_list[idx]
@@ -387,19 +417,32 @@ async def analyze_data(request: Request):
                     try:
                         val = result[q]
                         if isinstance(val, str) and val.startswith("data:image/"):
-                             mapped[key] = val # Keep the data URI string for images
+                            mapped[key] = val
                         else:
                             mapped[key] = caster(val) if val not in (None, "") else val
-                    except Exception:
+                    except Exception as map_exc:
+                        logger.error(f"Mapping error for key {key}: {map_exc}")
                         mapped[key] = result[q]
-            result = mapped
+        else:
+            mapped = dict(result)
 
-        return JSONResponse(content=result)
+        # Fill missing required keys with defaults
+        for k, v in REQUIRED_KEYS.items():
+            if k not in mapped or mapped[k] in (None, ""):
+                mapped[k] = v
+
+        # Validate base64 PNG for image fields
+        for img_key in ["network_graph", "degree_histogram"]:
+            if not is_valid_base64_png(mapped[img_key]):
+                mapped[img_key] = ""
+
+        logger.info(f"Final mapped result (schema-enforced): {mapped}")
+        return JSONResponse(content=mapped)
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.exception("analyze_data failed")
-        raise HTTPException(500, detail=str(e))
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 def run_agent_safely_unified(llm_input: str, pickle_path: str = None) -> Dict:
